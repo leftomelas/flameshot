@@ -7,20 +7,17 @@
 #include "src/core/qguiappcurrentscreen.h"
 #include "src/utils/globalvalues.h"
 #include "toolfactory.h"
+#include <QCursor>
 #include <QHeaderView>
 #include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QRect>
+#include <QScreen>
 #include <QStringList>
 #include <QTableWidget>
 #include <QVBoxLayout>
 #include <QVector>
-
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 10, 0))
-#include <QCursor>
-#include <QRect>
-#include <QScreen>
-#endif
 
 ShortcutsWidget::ShortcutsWidget(QWidget* parent)
   : QWidget(parent)
@@ -29,12 +26,10 @@ ShortcutsWidget::ShortcutsWidget(QWidget* parent)
     setWindowIcon(QIcon(GlobalValues::iconPath()));
     setWindowTitle(tr("Hot Keys"));
 
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 10, 0))
     QRect position = frameGeometry();
     QScreen* screen = QGuiAppCurrentScreen().currentScreen();
     position.moveCenter(screen->availableGeometry().center());
     move(position.topLeft());
-#endif
 
     m_layout = new QVBoxLayout(this);
     m_layout->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
@@ -135,7 +130,7 @@ void ShortcutsWidget::onShortcutCellClicked(int row, int col)
 
             // set no shortcut is Backspace
 #if defined(Q_OS_MACOS)
-            if (shortcutValue == QKeySequence(Qt::CTRL + Qt::Key_Backspace)) {
+            if (shortcutValue == QKeySequence(Qt::CTRL | Qt::Key_Backspace)) {
                 shortcutValue = QKeySequence("");
             }
 #else
@@ -202,10 +197,15 @@ void ShortcutsWidget::loadShortcuts()
     // Global hotkeys
 #if defined(Q_OS_MACOS)
     appendShortcut("TAKE_SCREENSHOT", tr("Capture screen"));
+#ifdef ENABLE_IMGUR
     appendShortcut("SCREENSHOT_HISTORY", tr("Screenshot history"));
+#endif
 #elif defined(Q_OS_WIN)
+
+#ifdef ENABLE_IMGUR
     m_shortcuts << (QStringList() << "" << QObject::tr("Screenshot history")
                                   << "Shift+Print Screen");
+#endif
     m_shortcuts << (QStringList()
                     << "" << QObject::tr("Capture screen") << "Print Screen");
 #else

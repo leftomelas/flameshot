@@ -33,7 +33,6 @@
 #include <QCheckBox>
 #include <QDateTime>
 #include <QDebug>
-#include <QDesktopWidget>
 #include <QFontMetrics>
 #include <QLabel>
 #include <QMessageBox>
@@ -206,6 +205,13 @@ CaptureWidget::CaptureWidget(const CaptureRequest& req,
 
     // Init color picker
     m_colorPicker = new ColorPicker(this);
+    // Init notification widget
+    m_notifierBox = new NotifierBox(this);
+    initPanel();
+
+    // TODO: Make it more clear why this has moved. In Qt6 some timing related
+    // to constructors / connect signals has changed so if initPanel is called
+    // after the connect a SEGFAULT occurs
     connect(m_colorPicker,
             &ColorPicker::colorSelected,
             this,
@@ -221,8 +227,6 @@ CaptureWidget::CaptureWidget(const CaptureRequest& req,
             this,
             &CaptureWidget::onToolSizeChanged);
 
-    // Init notification widget
-    m_notifierBox = new NotifierBox(this);
     m_notifierBox->hide();
     connect(m_notifierBox, &NotifierBox::hidden, this, [this]() {
         // Show cursor if it was hidden while adjusting tool size
@@ -232,23 +236,24 @@ CaptureWidget::CaptureWidget(const CaptureRequest& req,
         onToolSizeSettled(m_context.toolSize);
     });
 
-    initPanel();
-
     m_config.checkAndHandleError();
     if (m_config.hasError()) {
         m_configError = true;
     }
-    connect(ConfigHandler::getInstance(), &ConfigHandler::error, this, [=]() {
-        m_configError = true;
-        m_configErrorResolved = false;
-        OverlayMessage::instance()->update();
-    });
     connect(
-      ConfigHandler::getInstance(), &ConfigHandler::errorResolved, this, [=]() {
-          m_configError = false;
-          m_configErrorResolved = true;
+      ConfigHandler::getInstance(), &ConfigHandler::error, this, [=, this]() {
+          m_configError = true;
+          m_configErrorResolved = false;
           OverlayMessage::instance()->update();
       });
+    connect(ConfigHandler::getInstance(),
+            &ConfigHandler::errorResolved,
+            this,
+            [=, this]() {
+                m_configError = false;
+                m_configErrorResolved = true;
+                OverlayMessage::instance()->update();
+            });
 
     OverlayMessage::init(this,
                          QGuiAppCurrentScreen().currentScreen()->geometry());
@@ -301,7 +306,9 @@ void CaptureWidget::initButtons()
         for (auto* buttonList : { &allButtonTypes, &visibleButtonTypes }) {
             buttonList->removeOne(CaptureTool::TYPE_SAVE);
             buttonList->removeOne(CaptureTool::TYPE_COPY);
+#ifdef ENABLE_IMGUR
             buttonList->removeOne(CaptureTool::TYPE_IMAGEUPLOADER);
+#endif
             buttonList->removeOne(CaptureTool::TYPE_OPEN_APP);
             buttonList->removeOne(CaptureTool::TYPE_PIN);
         }
@@ -331,7 +338,7 @@ void CaptureWidget::initButtons()
                 if (!shortcut.isNull()) {
                     auto shortcuts = newShortcut(shortcut, this, nullptr);
                     for (auto* sc : shortcuts) {
-                        connect(sc, &QShortcut::activated, this, [=]() {
+                        connect(sc, &QShortcut::activated, this, [=, this]() {
                             setState(b);
                         });
                     }
@@ -419,7 +426,7 @@ void CaptureWidget::showxywh()
 void CaptureWidget::initHelpMessage()
 {
     QList<QPair<QString, QString>> keyMap;
-    keyMap << QPair(tr("Mouse"), tr("Select screenshot area"));
+    keyMap << std::pair(tr("Mouse"), tr("Select screenshot area"));
     using CT = CaptureTool;
     for (auto toolType : { CT::TYPE_ACCEPT, CT::TYPE_SAVE, CT::TYPE_COPY }) {
         if (!m_tools.contains(toolType)) {
@@ -430,14 +437,14 @@ void CaptureWidget::initHelpMessage()
           ConfigHandler().shortcut(QVariant::fromValue(toolType).toString());
         shortcut.replace("Return", "Enter");
         if (!shortcut.isEmpty()) {
-            keyMap << QPair(shortcut, tool->description());
+            keyMap << std::pair(shortcut, tool->description());
         }
     }
-    keyMap << QPair(tr("Mouse Wheel"), tr("Change tool size"));
-    keyMap << QPair(tr("Right Click"), tr("Show color picker"));
-    keyMap << QPair(ConfigHandler().shortcut("TYPE_TOGGLE_PANEL"),
-                    tr("Open side panel"));
-    keyMap << QPair(tr("Esc"), tr("Exit"));
+    keyMap << std::pair(tr("Mouse Wheel"), tr("Change tool size"));
+    keyMap << std::pair(tr("Right Click"), tr("Show color picker"));
+    keyMap << std::pair(ConfigHandler().shortcut("TYPE_TOGGLE_PANEL"),
+                        tr("Open side panel"));
+    keyMap << std::pair(tr("Esc"), tr("Exit"));
 
     m_helpMessage = OverlayMessage::compileFromKeyMap(keyMap);
 }
@@ -470,7 +477,6 @@ void CaptureWidget::initQuitPrompt()
 {
     m_quitPrompt = new QMessageBox;
     makeChild(m_quitPrompt);
-    m_quitPrompt->hide();
 
     QString baseSheet = "QDialog { background-color: %1; }"
                         "QLabel, QCheckBox { color: %2 }"
@@ -487,6 +493,15 @@ void CaptureWidget::initQuitPrompt()
 
     auto* check = new QCheckBox(tr("Do not show this again"));
     m_quitPrompt->setCheckBox(check);
+
+    // Call show() first, otherwise the correct geometry cannot be fetched
+    // for centering the window on the screen
+    m_quitPrompt->show();
+    QRect position = m_quitPrompt->frameGeometry();
+    QScreen* currentScreen = QGuiAppCurrentScreen().currentScreen();
+    position.moveCenter(currentScreen->availableGeometry().center());
+    m_quitPrompt->move(position.topLeft());
+    m_quitPrompt->hide();
 
     QObject::connect(check, &QCheckBox::clicked, [](bool checked) {
         ConfigHandler().setShowQuitPrompt(!checked);
@@ -651,17 +666,18 @@ void CaptureWidget::paintEvent(QPaintEvent* paintEvent)
         painter.setPen(uicolor);
         painter.setBrush(QBrush(uicolor));
 
-        auto topLeft = mapToGlobal(m_context.selection.topLeft());
+        const auto scale{ m_context.screenshot.devicePixelRatio() };
+        auto topLeft = mapToGlobal(m_context.selection.topLeft() / scale);
         topLeft.rx() -= topLeft.x() % m_gridSize;
         topLeft.ry() -= topLeft.y() % m_gridSize;
         topLeft = mapFromGlobal(topLeft);
 
-        const auto scale{ m_context.screenshot.devicePixelRatio() };
-        const auto step{ m_gridSize * scale };
+        const auto step{ m_gridSize / scale };
         const auto radius{ 1 * scale };
 
-        for (int y = topLeft.y(); y < m_context.selection.bottom(); y += step) {
-            for (int x = topLeft.x(); x < m_context.selection.right();
+        for (int y = topLeft.y(); y < m_context.selection.bottom() / scale;
+             y += step) {
+            for (int x = topLeft.x(); x < m_context.selection.right() / scale;
                  x += step) {
                 painter.drawEllipse(x, y, radius, radius);
             }
@@ -1221,10 +1237,6 @@ void CaptureWidget::showAppUpdateNotification(const QString& appLatestVersion,
     }
 #if defined(Q_OS_MACOS)
     int ax = (width() - m_updateNotificationWidget->width()) / 2;
-#elif (defined(Q_OS_LINUX) && QT_VERSION < QT_VERSION_CHECK(5, 10, 0))
-    QRect helpRect = QGuiApplication::primaryScreen()->geometry();
-    int ax = helpRect.left() +
-             ((helpRect.width() - m_updateNotificationWidget->width()) / 2);
 #else
     QRect helpRect;
     QScreen* currentScreen = QGuiAppCurrentScreen().currentScreen();
@@ -1279,7 +1291,7 @@ void CaptureWidget::initSelection()
     if (!initialSelection.isNull()) {
         const qreal scale = m_context.screenshot.devicePixelRatio();
         initialSelection.moveTopLeft(initialSelection.topLeft() -
-                                     mapToGlobal({}));
+                                     mapToGlobal(QPoint(0, 0)));
         initialSelection.setTop(initialSelection.top() / scale);
         initialSelection.setBottom(initialSelection.bottom() / scale);
         initialSelection.setLeft(initialSelection.left() / scale);
@@ -1801,10 +1813,8 @@ QPoint CaptureWidget::snapToGrid(const QPoint& point) const
 
     const auto scale{ m_context.screenshot.devicePixelRatio() };
 
-    snapPoint.setX((qRound(snapPoint.x() / double(m_gridSize)) * m_gridSize) *
-                   scale);
-    snapPoint.setY((qRound(snapPoint.y() / double(m_gridSize)) * m_gridSize) *
-                   scale);
+    snapPoint.setX((qRound(snapPoint.x() / double(m_gridSize)) * m_gridSize));
+    snapPoint.setY((qRound(snapPoint.y() / double(m_gridSize)) * m_gridSize));
 
     return mapFromGlobal(snapPoint);
 }

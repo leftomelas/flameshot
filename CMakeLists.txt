@@ -35,6 +35,16 @@ project(
 set(PROJECT_NAME_CAPITALIZED "Flameshot")
 
 include(FetchContent)
+#Must be set before fetching external content!
+#QT_DEFAULT_MAJOR_VERSION used by QHotkey
+set(QT_DEFAULT_MAJOR_VERSION 6 CACHE STRING "")
+#QT_VERSION_MAJOR used by Flameshot and QtColorWidgets
+set(QT_VERSION_MAJOR 6 CACHE STRING "")
+#BUILD_SHARED_LIBS used by QHotkey and QtColorWidgets
+option(BUILD_SHARED_LIBS OFF)
+
+#Needed due to linker error with QtColorWidget
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 FetchContent_Declare(
     qtColorWidgets
@@ -71,9 +81,7 @@ if(WIN32)
   add_definitions(-DFLAMESHOT_VERSION_BUILD=1)
   add_definitions(-DFLAMESHOT_VERSION_STRING="${PROJECT_VERSION}")
 elseif(APPLE)
-  set(Qt5_DIR "$(brew --prefix qt5)/lib/cmake/Qt5/" CACHE PATH "directory where Qt5Config.cmake exists.")
-  set(CMAKE_MACOSX_BUNDLE ON)
-  set(CMAKE_MACOSX_RPATH ON)
+  set(Qt6_DIR "$(brew --prefix qt6)/lib/cmake/Qt6/" CACHE PATH "directory where Qt6Config.cmake exists.")
 endif()
 set(RUN_IN_PLACE
         ${DEFAULT_RUN_IN_PLACE}
@@ -83,10 +91,16 @@ set(RUN_IN_PLACE
 option(FLAMESHOT_DEBUG_CAPTURE "Enable mode to make debugging easier" OFF)
 option(USE_MONOCHROME_ICON "Build using monochrome icon as default" OFF)
 option(GENERATE_TS "Regenerate translation source files" OFF)
-option(USE_EXTERNAL_SINGLEAPPLICATION "Use external QtSingleApplication library" OFF)
+option(USE_KDSINGLEAPPLICATION "Use KDSingleApplication library" ON)
 option(USE_LAUNCHER_ABSOLUTE_PATH "Use absolute path for the desktop launcher" ON)
 option(USE_WAYLAND_CLIPBOARD "USE KF Gui Wayland Clipboard" OFF)
 option(DISABLE_UPDATE_CHECKER "Disable check for updates" OFF)
+option(ENABLE_IMGUR "Enable Imgur Uploader" OFF)
+
+if (ENABLE_IMGUR)
+  add_compile_definitions(ENABLE_IMGUR)
+endif()
+
 if (DISABLE_UPDATE_CHECKER)
   add_compile_definitions(DISABLE_UPDATE_CHECKER)
 endif ()
@@ -94,7 +108,7 @@ endif ()
 include(cmake/StandardProjectSettings.cmake)
 
 add_library(project_options INTERFACE)
-target_compile_features(project_options INTERFACE cxx_std_17)
+target_compile_features(project_options INTERFACE cxx_std_20)
 
 add_library(project_warnings INTERFACE)
 
@@ -111,29 +125,20 @@ enable_sanitizers(project_options)
 
 # allow for static analysis options include(cmake/StaticAnalyzers.cmake)
 
-set(QAPPLICATION_CLASS
-        QApplication
-        CACHE STRING "Inheritance class for SingleApplication")
+if (USE_KDSINGLEAPPLICATION)
+  set(KDSingleApplication_EXAMPLES OFF CACHE BOOL "Don't build the examples")
+  set(KDSingleApplication_STATIC ON CACHE BOOL "Build static versions of the libraries")
 
-if(USE_EXTERNAL_SINGLEAPPLICATION)
-  # look for external QtSingleApplication
-  # package dev-qt/qtsingleapplication provides no symlink to current version
-  set(qtsingleapplication_libs libQt5Solutions_SingleApplication-2.6 Qt5Solutions_SingleApplication-2.6)
-  find_library(QTSINGLEAPPLICATION_LIBRARY NAMES ${qtsingleapplication_libs})
-  message(STATUS "Using external SingleApplication library")
-else()
   FetchContent_Declare(
-      singleApplication
-      GIT_REPOSITORY https://github.com/itay-grudev/SingleApplication.git
-      GIT_TAG v3.5.2
+      kdsingleApplication
+      GIT_REPOSITORY https://github.com/KDAB/KDSingleApplication.git
+      GIT_TAG v1.2.0
   )
-  FetchContent_MakeAvailable(SingleApplication)
-  set(QTSINGLEAPPLICATION_LIBRARY SingleApplication::SingleApplication)
+  FetchContent_MakeAvailable(KDSingleApplication)
 endif()
 
-
+# ToDo: Check if this is used anywhere
 option(BUILD_STATIC_LIBS ON)
-option(BUILD_SHARED_LIBS OFF)
 
 if (APPLE)
   FetchContent_Declare(

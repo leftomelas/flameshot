@@ -17,7 +17,7 @@
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QStandardPaths>
-#include <QTextCodec>
+#include <QStringDecoder>
 #include <QVBoxLayout>
 
 GeneralConf::GeneralConf(QWidget* parent)
@@ -53,13 +53,15 @@ GeneralConf::GeneralConf(QWidget* parent)
     initCopyOnDoubleClick();
     initSaveAfterCopy();
     initCopyPathAfterSave();
+    initAntialiasingPinZoom();
+    initUndoLimit();
+#ifdef ENABLE_IMGUR
     initCopyAndCloseAfterUpload();
     initUploadWithoutConfirmation();
     initHistoryConfirmationToDelete();
-    initAntialiasingPinZoom();
     initUploadHistoryMax();
-    initUndoLimit();
     initUploadClientSecret();
+#endif
     initPredefinedColorPaletteLarge();
     initShowSelectionGeometry();
 
@@ -82,15 +84,19 @@ void GeneralConf::_updateComponents(bool allowEmptySavePath)
     m_sysNotifications->setChecked(config.showDesktopNotification());
     m_abortNotifications->setChecked(config.showAbortNotification());
     m_autostart->setChecked(config.startupLaunch());
-    m_copyURLAfterUpload->setChecked(config.copyURLAfterUpload());
     m_saveAfterCopy->setChecked(config.saveAfterCopy());
     m_copyPathAfterSave->setChecked(config.copyPathAfterSave());
     m_antialiasingPinZoom->setChecked(config.antialiasingPinZoom());
     m_useJpgForClipboard->setChecked(config.useJpgForClipboard());
     m_copyOnDoubleClick->setChecked(config.copyOnDoubleClick());
+#ifdef ENABLE_IMGUR
     m_uploadWithoutConfirmation->setChecked(config.uploadWithoutConfirmation());
+    m_copyURLAfterUpload->setChecked(config.copyURLAfterUpload());
     m_historyConfirmationToDelete->setChecked(
       config.historyConfirmationToDelete());
+
+    m_uploadHistoryMax->setValue(config.uploadHistoryMax());
+#endif
 #if !defined(DISABLE_UPDATE_CHECKER)
     m_checkForUpdates->setChecked(config.checkForUpdates());
 #endif
@@ -109,7 +115,6 @@ void GeneralConf::_updateComponents(bool allowEmptySavePath)
     m_showStartupLaunchMessage->setChecked(config.showStartupLaunchMessage());
     m_showQuitPrompt->setChecked(config.showQuitPrompt());
     m_screenshotPathFixedCheck->setChecked(config.savePathFixed());
-    m_uploadHistoryMax->setValue(config.uploadHistoryMax());
     m_undoLimit->setValue(config.undoLimit());
 
     if (allowEmptySavePath || !config.savePath().isEmpty()) {
@@ -188,12 +193,12 @@ void GeneralConf::importConfiguration()
         return;
     }
     QFile file(fileName);
-    QTextCodec* codec = QTextCodec::codecForLocale();
     if (!file.open(QFile::ReadOnly)) {
         QMessageBox::about(this, tr("Error"), tr("Unable to read file."));
         return;
     }
-    QString text = codec->toUnicode(file.readAll());
+    QStringDecoder decoder(QStringDecoder::System);
+    QString text = decoder(file.readAll());
     file.close();
 
     QFile config(ConfigHandler().configFilePath());
@@ -201,7 +206,8 @@ void GeneralConf::importConfiguration()
         QMessageBox::about(this, tr("Error"), tr("Unable to write file."));
         return;
     }
-    config.write(codec->fromUnicode(text));
+    QStringEncoder encoder(QStringEncoder::System);
+    config.write(encoder(text));
     config.close();
 }
 
@@ -566,7 +572,7 @@ void GeneralConf::initSaveAfterCopy()
     m_setSaveAsFileExtension = new QComboBox(this);
 
     QStringList imageFormatList;
-    foreach (auto mimeType, QImageWriter::supportedImageFormats())
+    for (const auto& mimeType : QImageWriter::supportedImageFormats())
         imageFormatList.append(mimeType);
 
     m_setSaveAsFileExtension->addItems(imageFormatList);

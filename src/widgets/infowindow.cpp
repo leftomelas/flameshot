@@ -23,14 +23,13 @@ InfoWindow::InfoWindow(QWidget* parent)
     connect(
       ui->CopyInfoButton, &QPushButton::clicked, this, &InfoWindow::copyInfo);
 
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 10, 0))
+    show();
+    // Call show() first, otherwise the correct geometry cannot be fetched for
+    // centering the window on the screen
     QRect position = frameGeometry();
     QScreen* screen = QGuiAppCurrentScreen().currentScreen();
     position.moveCenter(screen->availableGeometry().center());
     move(position.topLeft());
-#endif
-
-    show();
 }
 
 InfoWindow::~InfoWindow()
